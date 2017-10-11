@@ -1,3 +1,10 @@
 <resources>
-    <string name="app_name">profileChanger</string>
+    <string name="app_name">Profile Changer</string>
+
+    <string name="dialog_title">Volume profile for %s</string>
+    <string name="mute">Mute</string>
+    <string name="normal">Normal</string>
+    <string name="noWifi">No wifi networks available!</string>
+    <string name="vibration">Vibration</string>
+
 </resources>
