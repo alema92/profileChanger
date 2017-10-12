@@ -134,6 +134,9 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        // scanning available wifis
+        wifiManager.startScan();
+
         // register broadcast receiver when refreshing available wifis
         // I need 2 receiver, this is declared here because it is dynamic
         // and when application close it will stop listening for scanning
@@ -169,10 +172,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         // Check which request we're responding to
         if (requestCode == 1) {
-            // Make sure the request was successful
-            if (resultCode == RESULT_OK) {
-                mGPSDialog.dismiss();
-            }
+            mGPSDialog.dismiss();
         }
     }
 
