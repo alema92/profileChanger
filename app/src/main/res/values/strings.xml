@@ -4,7 +4,11 @@
     <string name="dialog_title">Volume profile for %s</string>
     <string name="mute">Mute</string>
     <string name="normal">Normal</string>
+    <string name="no_gps">Exit</string>
+    <string name="ok_gps">Enable GPS</string>
     <string name="noWifi">No wifi networks available!</string>
+    <string name="text_gps">Gps is disabled, in order to use the application properly you need to enable GPS of your device</string>
+    <string name="title_gps">GPS Disabled</string>
     <string name="vibration">Vibration</string>
 
 </resources>

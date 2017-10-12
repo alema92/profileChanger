@@ -1,23 +1,28 @@
 package it.polito.profilechanger;
 
-import android.app.Dialog;
+import android.Manifest;
+import android.app.AlertDialog;
 import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.location.LocationManager;
 import android.media.AudioManager;
-import android.net.NetworkInfo;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
-import android.widget.RadioButton;
 import android.widget.TextView;
 
 import java.util.ArrayList;
@@ -25,6 +30,8 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
+    public static final int MY_PERMISSIONS_REQUEST_LOCATION = 99;
+    AlertDialog mGPSDialog;
     SharedPreferences sharedPref;
     WifiManager wifiManager;
     ListView list;
@@ -36,7 +43,7 @@ public class MainActivity extends AppCompatActivity {
 
         // initialization
         setContentView(R.layout.activity_main);
-        sharedPref = this.getPreferences(Context.MODE_PRIVATE);
+        sharedPref = this.getSharedPreferences("myPrefs", Context.MODE_PRIVATE);
         list = (ListView) findViewById(R.id.listView1);
         noNet = (TextView) findViewById(R.id.noNet);
         wifiManager = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
@@ -56,61 +63,52 @@ public class MainActivity extends AppCompatActivity {
 
     private void showRadioButtonDialog(final String ssid) {
         // custom dialog initialization
-        final Dialog dialog = new Dialog(this);
-        dialog.setTitle(String.format(getString(R.string.dialog_title), ssid));
-        dialog.setContentView(R.layout.dialog);
-        dialog.setCancelable(true);
-        dialog.show();
-
-        //initialization
-        RadioButton rd1 = (RadioButton) dialog.findViewById(R.id.r1);
-        RadioButton rd2 = (RadioButton) dialog.findViewById(R.id.r2);
-        RadioButton rd3 = (RadioButton) dialog.findViewById(R.id.r3);
+        AlertDialog dialog;
+        CharSequence[] values = {getString(R.string.normal), getString(R.string.vibration), getString(R.string.mute)};
+        final AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+        builder.setTitle(String.format(getString(R.string.dialog_title), ssid));
+        builder.setCancelable(true);
 
         // if the profile has already been set, check corresponding radio button
         int profile = sharedPref.getInt(ssid, -1);
-        switch (profile) {
-            case 0:
-                rd1.setChecked(true);
-                break;
-            case 1:
-                rd2.setChecked(true);
-                break;
-            case 2:
-                rd3.setChecked(true);
-                break;
-            default:
-                break;
-        }
-
-        rd1.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                onClickRadioB(ssid, 0, v.getContext(), dialog);
+        builder.setSingleChoiceItems(values, profile, new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog, int item) {
+                // add corresponding profile value to shared preferences when radio button (item) is clicked
+                SharedPreferences.Editor editor = sharedPref.edit();
+                editor.putInt(ssid, item);
+                editor.apply();
+                // set right profile if already connected to wifi just modified then close dialog
+                changeProfile();
+                dialog.dismiss();
             }
         });
-        rd2.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                onClickRadioB(ssid, 1, v.getContext(), dialog);
-            }
-        });
-        rd3.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                onClickRadioB(ssid, 2, v.getContext(), dialog);
-            }
-        });
+        dialog = builder.create();
+        dialog.show();
     }
 
-    public void onClickRadioB(String ssid, int profile, Context c, Dialog dialog) {
-        SharedPreferences.Editor editor = sharedPref.edit();
-        // add corresponding profile value to shared preferences when radio button is clicked
-        editor.putInt(ssid, profile);
-        editor.apply();
-        // set profile and close dialog
-        changeProfile(c);
-        dialog.dismiss();
+    private void changeProfile() {
+        WifiInfo wifiInfo = wifiManager.getConnectionInfo();
+        String ssid = wifiInfo.getSSID().replace("\"", "");
+        if (ssid != null) {
+            // if it is already connected to the network just updated,
+            // and if the name is present in the shared preferences list,
+            // change profile accordingly
+            AudioManager audioManager = (AudioManager) getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
+            int profile = sharedPref.getInt(ssid, -1);
+            switch (profile) {
+                case 0:
+                    audioManager.setRingerMode(AudioManager.RINGER_MODE_NORMAL);
+                    break;
+                case 1:
+                    audioManager.setRingerMode(AudioManager.RINGER_MODE_VIBRATE);
+                    break;
+                case 2:
+                    audioManager.setRingerMode(AudioManager.RINGER_MODE_SILENT);
+                    break;
+                default:
+                    break;
+            }
+        }
     }
 
     @Override
@@ -121,10 +119,61 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onResume() {
-        // register broadcast receiver when connecting to a network and when refreshing available wifis
+        // for API >= 23, to scan network you need to turn on gps and grant permission for location
+        if (Build.VERSION.SDK_INT >= 23) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION)
+                    != PackageManager.PERMISSION_GRANTED) {
+
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.ACCESS_FINE_LOCATION},
+                        MY_PERMISSIONS_REQUEST_LOCATION);
+            }
+            LocationManager manager = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+            if (!manager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                showGPSDisabledDialog();
+            }
+        }
+
+        // register broadcast receiver when refreshing available wifis
+        // I need 2 receiver, this is declared here because it is dynamic
+        // and when application close it will stop listening for scanning
+        // the other one instead is declared statically in the manifest,
+        // because I need it even after closing application
+        // (if connecting to a wifi for which I have set a profile, it must change profile accordingly)
         registerReceiver(receiver, new IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION));
-        registerReceiver(receiver, new IntentFilter(WifiManager.WIFI_STATE_CHANGED_ACTION));
+
         super.onResume();
+    }
+
+    public void showGPSDisabledDialog() {
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setTitle(getString(R.string.title_gps))
+                .setMessage(getString(R.string.text_gps))
+                .setPositiveButton(getString(R.string.ok_gps), new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        startActivityForResult(new Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS), 1);
+                    }
+                })
+                .setNegativeButton(getString(R.string.no_gps), new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        onBackPressed();
+                    }
+                });
+        mGPSDialog = builder.create();
+        mGPSDialog.show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        // Check which request we're responding to
+        if (requestCode == 1) {
+            // Make sure the request was successful
+            if (resultCode == RESULT_OK) {
+                mGPSDialog.dismiss();
+            }
+        }
     }
 
     private BroadcastReceiver receiver = new BroadcastReceiver() {
@@ -143,50 +192,16 @@ public class MainActivity extends AppCompatActivity {
                         wifis.add(ssid);
                     }
                 }
-                // set the adapter with the list
-                list.setAdapter(new ArrayAdapter<>(getApplicationContext(), R.layout.list_item, wifis));
-
                 // if there are no wifis, show a message
                 if (wifis.isEmpty()) {
                     noNet.setVisibility(View.VISIBLE);
                 } else {
                     noNet.setVisibility(View.GONE);
+                    // set the adapter with the list
+                    list.setAdapter(new ArrayAdapter<>(getApplicationContext(), R.layout.list_item, wifis));
                 }
-                // if is connected change profile
-                changeProfile(c);
             }
         }
     };
 
-    // change when select profile in dialog and when connecting
-    public void changeProfile(Context c) {
-        // get information about connection (if connected or connecting, proceed)
-        WifiInfo wifiInfo = wifiManager.getConnectionInfo();
-        if (wifiInfo != null) {
-            NetworkInfo.DetailedState state = WifiInfo.getDetailedStateOf(wifiInfo.getSupplicantState());
-            if (state == NetworkInfo.DetailedState.CONNECTED ||
-                    state == NetworkInfo.DetailedState.OBTAINING_IPADDR) {
-                // getSSID return the name with ""
-                String ssid = wifiInfo.getSSID().replace("\"", "");
-                if (ssid != null) {
-                    // when connected, if the name is present in the shared preferences list, change profile accordingly
-                    AudioManager audioManager = (AudioManager) c.getApplicationContext().getSystemService(Context.AUDIO_SERVICE);
-                    int profile = sharedPref.getInt(ssid, -1);
-                    switch (profile) {
-                        case 0:
-                            audioManager.setRingerMode(AudioManager.RINGER_MODE_NORMAL);
-                            break;
-                        case 1:
-                            audioManager.setRingerMode(AudioManager.RINGER_MODE_VIBRATE);
-                            break;
-                        case 2:
-                            audioManager.setRingerMode(AudioManager.RINGER_MODE_SILENT);
-                            break;
-                        default:
-                            break;
-                    }
-                }
-            }
-        }
-    }
 }
